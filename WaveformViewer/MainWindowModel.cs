@@ -2,6 +2,7 @@
 using System.IO;
 using System.Reflection.Emit;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ScottPlot;
@@ -101,9 +102,9 @@ namespace WaveformViewer
         public async Task GenerateWaveform(WpfPlot plt, params string[] path)
         {
             if (path.Length > 4)
-                MessageBox.Show("错误", "不支持大于4个波形文件解析!", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("不支持大于4个波形文件解析!", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             if (!path.Any(p => p.Contains("C1") || p.Contains("C2") || p.Contains("C3") || p.Contains("C4")))
-                MessageBox.Show("错误", "存在不规范文件名，请使用带 C1，C2，C3，C4 的字符串文件格式导入!", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("存在不规范文件名，请在文件名开头用 C1(VGE) C2(VCE) C3(IC) C4(IG) 导入!", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             var t1 = Task.Run(() =>
             {
                 try
@@ -164,6 +165,33 @@ namespace WaveformViewer
                 return Task.CompletedTask;
             });
             Task.WaitAll(t1, t2, t3, t4);
+            var c1Count = _c1X!.Length;
+            var c2Count = _c2X!.Length;
+            var c3Count = _c3X!.Length;
+            var c4Count = _c4X!.Length;
+            var min = new List<int>() { c1Count, c2Count, c3Count, c4Count }.Where(n => n != 0).Min();
+            //处理波形对齐
+            if (min != 0)
+            {
+                foreach (var xArray in from data in new List<double[]?> { _c1X, _c2X, _c3X, _c4X }.OfType<double[]>() where data.Any() select data!.Skip(100).Take(min - 100).ToArray())
+                {
+                    if (_c1X.Length != 0)
+                        _c1X = xArray;
+                    if (_c2X.Length != 0)
+                        _c2X = xArray;
+                    if (_c3X.Length != 0)
+                        _c3X = xArray;
+                    if (_c4X.Length != 0)
+                        _c4X = xArray;
+                }
+                //_c2X = _c2X!.Skip(100).Take(min - 100).ToArray();
+                //_c3X = _c3X!.Skip(100).Take(min - 100).ToArray();
+                //_c4X = _c4X!.Skip(100).Take(min - 100).ToArray();
+                _c1Y = _c1Y!.Skip(100).Take(min - 100).ToArray();
+                _c2Y = _c2Y!.Skip(100).Take(min - 100).ToArray();
+                _c3Y = _c3Y!.Skip(100).Take(min - 100).ToArray();
+                _c4Y = _c4Y!.Skip(100).Take(min - 100).ToArray();
+            }
             DrawPlot(plt);
         }
 
@@ -270,18 +298,44 @@ namespace WaveformViewer
             Pixel mousePixel = new(p.X * _plot!.DisplayScale, p.Y * _plot.DisplayScale);
             Coordinates mouseCoordinates = _plot.Plot.GetCoordinates(mousePixel);
             crosshair!.Position = mouseCoordinates;
-            var c2 = _plot.Plot.GetCoordinates(mousePixel, _c2v!.Axes.XAxis, _c2v.Axes.YAxis);
-            var c3 = _plot.Plot.GetCoordinates(mousePixel, _c3v!.Axes.XAxis, _c3v.Axes.YAxis);
-            var c4 = _plot.Plot.GetCoordinates(mousePixel, _c4v!.Axes.XAxis, _c4v.Axes.YAxis);
-            var str = $"VGE:{mouseCoordinates.Y:N3}V\r\n" +
-                      $"VCE:{c2.Y:N3}V\r\n" +
-                      $"IC:{c3.Y:N3}A\r\n" +
-                      $"IG:{c4.Y:N3}A";
+            //var c2 = _plot.Plot.GetCoordinates(mousePixel, _c2v!.Axes.XAxis, _c2v.Axes.YAxis);
+            //var c3 = _plot.Plot.GetCoordinates(mousePixel, _c3v!.Axes.XAxis, _c3v.Axes.YAxis);
+            //var c4 = _plot.Plot.GetCoordinates(mousePixel, _c4v!.Axes.XAxis, _c4v.Axes.YAxis);
+            var str = string.Empty;
+            foreach (var data in  new List<double[]?> { _c1X, _c2X, _c3X, _c4X })
+            {
+                if (data is { Length: > 0 })
+                {
+                    if (data.First() <= mouseCoordinates.X && data.Last() >= mouseCoordinates.X)
+                    {
+                        var xIndex = 0;
+                        double c1Y = double.NaN, c2Y = double.NaN, c3Y = double.NaN, c4Y = double.NaN;
+                        for (int i = 0; i < data.Length; i++)
+                        {
+                            if (!(data[i] >= mouseCoordinates.X)) continue;
+                            xIndex = i;
+                            break;
+                        }
+                        if (_c1Y!.Length > xIndex)
+                            c1Y = _c1Y![xIndex];
+                        if (_c2Y!.Length > xIndex)
+                            c2Y = _c2Y![xIndex];
+                        if (_c3Y!.Length > xIndex)
+                            c3Y = _c3Y![xIndex];
+                        if (_c4Y!.Length > xIndex)
+                            c4Y = _c4Y![xIndex];
+                        str = $"VGE:{c1Y:N3} V\r\n" +
+                              $"VCE:{c2Y:N3} V\r\n" +
+                              $"IC:{c3Y:N3} A\r\n" +
+                              $"IG:{c4Y:N3} A";
+                    }
+                }
+            }
             crosshair.HorizontalLine.Text = str;
             crosshair.HorizontalLine.LabelRotation = 0;
             crosshair.HorizontalLine.LabelOffsetX = 60;
             crosshair.VerticalLine.LabelOffsetY = -30;
-            crosshair.VerticalLine.Text = $"{mouseCoordinates.X:N3}μS";
+            crosshair.VerticalLine.Text = $"{mouseCoordinates.X:N3} μS";
             _plot.Refresh();
         }
     }
